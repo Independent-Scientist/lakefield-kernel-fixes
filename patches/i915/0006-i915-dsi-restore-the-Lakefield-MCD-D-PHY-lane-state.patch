@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lakefield kernel fixes <lakefield@example.invalid>
+Date: Tue, 17 Nov 2026 05:08:46 -0300
+Subject: [PATCH] i915/dsi: restore the Lakefield MCD D-PHY lane state
+
+This is the change that makes the internal MIPI-DSI panel work.
+
+Lakefield's combo PHY contains a Modular Configurable D-PHY (MCD): a
+non-VPG D-PHY that does not self-configure, so software must program the
+lanes (Lakefield PRM Vol 12, "MCD Programming"). i915 only knows the VPG
+(Ice Lake) D-PHY, and the two register layouts alias each other: ICL's
+PORT_TX_DW5 is DBBUDLN_MST_SLV_INIT_CTL here, and ICL's TX_DW writes zero
+the lane TX timing registers. The D-PHY ends up with no TX timing, so no
+packets leave it. A video-mode DSI panel has no link training and no
+acknowledgement, so this fails completely silently.
+
+Re-program the five lane blocks (base 0x162280 + lane * 0x200) and
+CBBS_CLOCK_CTRL with the values the firmware leaves behind when the panel
+is lit, after gen11_dsi_setup_dphy_timings() and before
+gen11_dsi_enable_ddi_buffer(), matching the PRM order. SOFT_RST_CTL is
+cleared explicitly because the swing/pre-emphasis write leaves UDLN reset
+overrides there on lane 2, the clock lane.
+
+Per-lane values matter: lane 2 is the clock lane and lane 0 is the AUX
+lane, so writing lane 0's block to all five leaves the panel black.
+
+Verified on the hardware: with this in place fb0 becomes i915drmfb, the
+DSI connector is connected+enabled, and a lightdm login renders on the
+panel. A firmware-vs-i915 register diff over 0x162000-0x162b3c then
+agrees on all but two status registers.
+---
+ drivers/gpu/drm/i915/display/icl_dsi.c | 51 ++++++++++++++++++++++++++
+ 1 file changed, 51 insertions(+)
+
+diff --git a/drivers/gpu/drm/i915/display/icl_dsi.c b/drivers/gpu/drm/i915/display/icl_dsi.c
+index a549f1f..fee844b 100644
+--- a/drivers/gpu/drm/i915/display/icl_dsi.c
++++ b/drivers/gpu/drm/i915/display/icl_dsi.c
+@@ -1149,6 +1149,57 @@ gen11_dsi_enable_port_and_phy(struct intel_encoder *encoder,
+ 	/* setup D-PHY timings */
+ 	gen11_dsi_setup_dphy_timings(encoder, crtc_state);
+ 
++	/*
++	 * Lakefield's D-PHY is a Modular Configurable D-PHY (MCD), a non-VPG
++	 * design with its own programming model (Lakefield PRM Vol 12, "MCD
++	 * Programming"). The ICL combo-PHY programming above lands on MCD
++	 * registers here: ICL's PORT_TX_DW5 aliases UDLN MST_SLV_INIT_CTL, and
++	 * the TX_DW writes zero DBBUDLN_TX_TIMING_CTL0/1. The lanes are then
++	 * left with no TX timing and nothing leaves the PHY - panel dark with
++	 * the backlight on, and no error anywhere because a video-mode DSI
++	 * panel has no link training and no acknowledgement.
++	 *
++	 * Restore the values the firmware programs, captured from a state in
++	 * which this panel does display (UEFI GOP, first i915 load after boot).
++	 * Lanes are NOT identical: lane 2 is the clock lane and has its own TX
++	 * timing, and lane 0 (data 0 / AUX) has TXRX_CTL bit 12 set.
++	 */
++	{
++		struct intel_display *display = to_intel_display(encoder);
++		static const struct {
++			u32 ctl, mst, t0, t1, t2, t3;
++		} mcd[5] = {
++			{ 0x00001c0b, 1, 0x08110505, 0x0a000011, 0x017f0001, 0x00030200 },
++			{ 0x00000c0b, 1, 0x08110505, 0x0a000011, 0x017f0001, 0x00030200 },
++			{ 0x00000c0b, 1, 0x08230505, 0x0a001711, 0x017f0001, 0x00030200 },
++			{ 0x00000c0b, 1, 0x08110505, 0x0a000011, 0x017f0001, 0x00030200 },
++			{ 0x00000c0b, 1, 0x08110505, 0x0a000011, 0x017f0001, 0x00030200 },
++		};
++		int lane;
++
++		/* CBBS: HS clock to left+right lanes, TX word clock /8 */
++		intel_de_write(display, _MMIO(0x162030), 0x0c518d00);
++
++		for (lane = 0; lane < 5; lane++) {
++			u32 b = 0x162280 + lane * 0x200;
++
++			/*
++			 * i915's ICL PORT_TX_DW2_GRP(PHY_A) is 0x162688, which is
++			 * this register for lane 2, and its swing/pre-emphasis
++			 * write leaves 0x18 there - the UDLN reset / TXLP latch
++			 * override bits. The firmware leaves it 0; a clock lane
++			 * held in reset means no clock and no image.
++			 */
++			intel_de_write(display, _MMIO(b + 0x08), 0x00000000);
++			intel_de_write(display, _MMIO(b + 0x10), mcd[lane].ctl);
++			intel_de_write(display, _MMIO(b + 0x14), mcd[lane].mst);
++			intel_de_write(display, _MMIO(b + 0x18), mcd[lane].t0);
++			intel_de_write(display, _MMIO(b + 0x1c), mcd[lane].t1);
++			intel_de_write(display, _MMIO(b + 0x20), mcd[lane].t2);
++			intel_de_write(display, _MMIO(b + 0x24), mcd[lane].t3);
++		}
++	}
++
+ 	/* enable DDI buffer */
+ 	gen11_dsi_enable_ddi_buffer(encoder);
+ 

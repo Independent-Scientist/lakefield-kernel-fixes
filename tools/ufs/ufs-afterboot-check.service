@@ -1,0 +1,14 @@
+[Unit]
+Description=UFS post-boot liveness check (one-shot, read-only)
+Documentation=file:/usr/local/share/doc/lakefield-kernel-fixes/docs/ufs.md
+After=multi-user.target
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+# Where last-result.txt and the timestamped log dirs go. Must be writable by root and
+# must NOT be on the disk being checked.
+Environment=UFS_DIR=/var/lib/ufs-check
+ExecStart=/bin/bash /usr/local/sbin/ufs-afterboot-check.sh
+TimeoutStartSec=15min

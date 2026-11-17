@@ -1,0 +1,21 @@
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -11423,7 +11423,17 @@
+ 
+ 	blk_pm_runtime_init(sdev->request_queue, dev);
+ 	pm_runtime_set_autosuspend_delay(dev, 0);
+-	pm_runtime_allow(dev);
++	/*
++	 * Never runtime-suspend the well-known LUN on this Lakefield UFS host
++	 * (Intel PCI 0000:00:12.5): ufshcd_wl_runtime_resume() walks
++	 * ufshcd_reset_and_restore() -> ufshcd_post_device_init() ->
++	 * ufshcd_config_pwr_mode(), where the Intel POST_CHANGE
++	 * dme_peer_get(PA_GRANULARITY, 0x15AA) times out, leaving the controller
++	 * in "HBA state error" and every later read of the disk returning -EIO
++	 * until reboot.  Forbidding runtime PM at probe closes that path before
++	 * any udev rule or initramfs ordering can race it.
++	 */
++	pm_runtime_forbid(dev);
+ 
+ 	return  0;
+ }

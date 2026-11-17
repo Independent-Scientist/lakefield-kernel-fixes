@@ -1,0 +1,71 @@
+#!/bin/bash
+# lkf-i915-rebuild — apply patches/i915 to a kernel source tree, build the module
+# and install it for the given kernel.
+#
+# Usage: sudo lkf-i915-rebuild [kernel-version]      (default: running kernel)
+# Env:   KSRC=<kernel source tree>   default: /usr/src/linux-<version>
+#        PATCHDIR=<dir>              default: <dir of this script>/../../patches/i915
+#
+# The source tree must already be configured for the target kernel and have
+# Module.symvers (see docs/building.md). This script deliberately does not
+# configure a tree for you: guessing a config is how you get a module that builds
+# and does not load.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+PATCHDIR=${PATCHDIR:-$HERE/../../patches/i915}
+K=${1:-$(uname -r)}
+
+if [ "$(id -u)" -ne 0 ]; then
+	echo "must run as root" >&2
+	exit 1
+fi
+[ -d "$PATCHDIR" ] || { echo "no patch directory at $PATCHDIR" >&2; exit 1; }
+
+if [ -n "${KSRC:-}" ]; then
+	SRC=$KSRC
+else
+	SRC=
+	for cand in "/usr/src/linux-$K" "/usr/src/linux-${K%%-arch*}" \
+	            "/lib/modules/$K/build"; do
+		[ -d "$cand/drivers/gpu/drm/i915" ] && { SRC=$cand; break; }
+	done
+fi
+[ -n "${SRC:-}" ] && [ -d "$SRC/drivers/gpu/drm/i915" ] || {
+	echo "no kernel source tree for $K. Set KSRC=/path/to/linux-$K" >&2
+	echo "sources: https://cdn.kernel.org/pub/linux/kernel/  or your distro's kernel package" >&2
+	exit 1
+}
+
+# A built tree from /lib/modules/$K/build is header-only on most distros; a real
+# source tree is required to compile i915.
+if [ ! -f "$SRC/Makefile" ] || [ ! -d "$SRC/drivers/gpu/drm/i915" ]; then
+	echo "$SRC is not a kernel source tree" >&2
+	exit 1
+fi
+
+if [ ! -f "$SRC/Module.symvers" ] && [ -f "/lib/modules/$K/build/Module.symvers" ]; then
+	echo "copying Module.symvers from /lib/modules/$K/build"
+	cp "/lib/modules/$K/build/Module.symvers" "$SRC/Module.symvers"
+fi
+
+echo "=== applying $PATCHDIR to $SRC"
+for p in "$PATCHDIR"/*.patch; do
+	echo "    $(basename "$p")"
+	patch -p1 -d "$SRC" --forward < "$p" >/dev/null || {
+		echo "patch failed: $p (already applied, or tree does not match)" >&2
+		exit 1
+	}
+done
+
+echo "=== building i915 for $K"
+make -C "$SRC" -j"$(nproc)" M=drivers/gpu/drm/i915 modules
+
+KO="$SRC/drivers/gpu/drm/i915/i915.ko"
+[ -f "$KO" ] || { echo "build produced no i915.ko" >&2; exit 1; }
+
+"$HERE/install-i915.sh" "$KO" "$K"
+
+echo
+echo "note: patches stay applied in $SRC. Re-running this script on the same tree"
+echo "      will fail on the first patch; use a pristine tree per kernel."

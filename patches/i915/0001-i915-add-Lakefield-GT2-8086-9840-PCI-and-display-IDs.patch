@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lakefield kernel fixes <lakefield@example.invalid>
+Date: Tue, 17 Nov 2026 05:08:46 -0300
+Subject: [PATCH] i915: add Lakefield GT2 (8086:9840) PCI and display IDs
+
+Lakefield (Core i5-L16G7, Samsung Galaxy Book S 767XCL) has no platform
+of its own in i915, so 8086:9840 has never been claimed by any DRM
+driver: card0 is simpledrm over the UEFI framebuffer and 3D is llvmpipe.
+
+Impersonate Elkhart Lake in both of the tables i915 selects a device
+from. Missing the first means nothing binds; missing the second means
+the driver binds and renders but display initialisation is skipped
+without any output at the default log level.
+
+ehl_info was chosen over icl_info on the evidence: the engines that
+register are bcs0/rcs0/vcs0/vecs0 (no VCS2, which is EHL's mask, not
+ICL's) and the GT frequency table read from the fuses matches Lakefield
+(200 MHz RP1 / 500 MHz RP0).
+---
+ drivers/gpu/drm/i915/display/intel_display_device.c |  8 ++++++++
+ drivers/gpu/drm/i915/i915_pci.c                     | 12 ++++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/drivers/gpu/drm/i915/display/intel_display_device.c b/drivers/gpu/drm/i915/display/intel_display_device.c
+index 69a9f78..fd61749 100644
+--- a/drivers/gpu/drm/i915/display/intel_display_device.c
++++ b/drivers/gpu/drm/i915/display/intel_display_device.c
+@@ -1482,6 +1482,14 @@ static const struct {
+ 	INTEL_CML_IDS(INTEL_DISPLAY_DEVICE, &cml_desc),
+ 	INTEL_ICL_IDS(INTEL_DISPLAY_DEVICE, &icl_desc),
+ 	INTEL_EHL_IDS(INTEL_DISPLAY_DEVICE, &ehl_desc),
++	/*
++	 * Lakefield GT2 (8086:9840). Both tables are needed: without this one
++	 * intel_display_device_probe() bails out at drm_dbg_kms() level
++	 * ("Unknown device ID 9840; disabling display") and the driver binds
++	 * with rendering working but no display at all - no connectors, no
++	 * fbdev, and no message unless drm.debug is on.
++	 */
++	INTEL_DISPLAY_DEVICE(0x9840, &ehl_desc),
+ 	INTEL_JSL_IDS(INTEL_DISPLAY_DEVICE, &jsl_desc),
+ 	INTEL_TGL_IDS(INTEL_DISPLAY_DEVICE, &tgl_desc),
+ 	INTEL_DG1_IDS(INTEL_DISPLAY_DEVICE, &dg1_desc),
+diff --git a/drivers/gpu/drm/i915/i915_pci.c b/drivers/gpu/drm/i915/i915_pci.c
+index 2f03f95..c39a5cc 100644
+--- a/drivers/gpu/drm/i915/i915_pci.c
++++ b/drivers/gpu/drm/i915/i915_pci.c
+@@ -854,6 +854,18 @@ static const struct pci_device_id pciidlist[] = {
+ 	INTEL_CML_U_GT2_IDS(INTEL_VGA_DEVICE, &cml_gt2_info),
+ 	INTEL_ICL_IDS(INTEL_VGA_DEVICE, &icl_info),
+ 	INTEL_EHL_IDS(INTEL_VGA_DEVICE, &ehl_info),
++	/*
++	 * Lakefield GT2 (8086:9840).
++	 *
++	 * i915 has no Lakefield platform at all, so there is no "correct"
++	 * entry to add here - this impersonates a platform i915 already
++	 * supports. Elkhart Lake is the closest match: same Gen11 LP design,
++	 * no VCS2 video-enhance engine, 36-bit PPGTT. The GT frequency table
++	 * read back from Lakefield's own fuses comes out right with it
++	 * (RP1 200 MHz / RP0 500 MHz), which is the check that says the
++	 * impersonation is behaviourally correct rather than lucky.
++	 */
++	INTEL_VGA_DEVICE(0x9840, &ehl_info), /* Lakefield GT2 */
+ 	INTEL_JSL_IDS(INTEL_VGA_DEVICE, &jsl_info),
+ 	INTEL_TGL_IDS(INTEL_VGA_DEVICE, &tgl_info),
+ 	INTEL_RKL_IDS(INTEL_VGA_DEVICE, &rkl_info),

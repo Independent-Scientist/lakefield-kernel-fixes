@@ -1,0 +1,50 @@
+#!/bin/bash
+# lkf-i915-post-update — pacman post-transaction hook helper.
+#
+# A kernel update replaces the patched i915 with the stock one and the internal
+# panel goes dark on the next boot. This runs after every transaction and either
+# rebuilds the module for the newest installed kernel or leaves a loud warning in
+# the log. It never silently pretends the module is still patched.
+#
+# Install:
+#   sudo install -m755 lkf-i915-post-update /usr/local/bin/
+#   sudo install -m644 90-lkf-i915.hook    /etc/pacman.d/hooks/
+set -uo pipefail
+
+LOG=/var/log/lkf-i915-post-update.log
+exec >>"$LOG" 2>&1
+echo "=== $(date -Is) kernel update post-hook"
+
+NEW=$(ls -1 /usr/lib/modules 2>/dev/null | sort -V | tail -1)
+echo "newest installed kernel: ${NEW:-none}"
+echo "currently running:       $(uname -r)"
+[ -n "$NEW" ] || exit 0
+
+MOD=/lib/modules/$NEW/kernel/drivers/gpu/drm/i915/i915.ko.zst
+[ -f "$MOD" ] || { echo "kernel $NEW has no i915 module; nothing to do"; exit 0; }
+
+if [ -d "/usr/src/linux-$NEW/drivers/gpu/drm/i915" ] ||
+   [ -d "/usr/src/linux-${NEW%%-arch*}/drivers/gpu/drm/i915" ]; then
+	echo "source tree present - rebuilding"
+	if /usr/local/bin/lkf-i915-rebuild "$NEW"; then
+		echo "rebuild OK"
+	else
+		echo "REBUILD FAILED - see output above"
+	fi
+else
+	cat <<EOF
+WARNING: patched i915 was NOT rebuilt for kernel $NEW.
+
+The internal MIPI-DSI panel only lights up with the patched driver. On $NEW the
+stock module will be used and the panel will stay dark (the machine still boots
+to a text console, or to the UEFI framebuffer).
+
+To fix, provide a matching source tree and rebuild:
+  curl -O https://cdn.kernel.org/pub/linux/kernel/v${NEW%%.*}.x/linux-${NEW%%-arch*}.tar.xz
+  tar -xf linux-${NEW%%-arch*}.tar.xz -C /usr/src
+  cd /usr/src/linux-${NEW%%-arch*} && zcat /proc/config.gz > .config \\
+    && ./scripts/config --set-str LOCALVERSION "${NEW#"${NEW%%-*}"}" \\
+    && make olddefconfig && make modules_prepare
+  sudo lkf-i915-rebuild $NEW
+EOF
+fi

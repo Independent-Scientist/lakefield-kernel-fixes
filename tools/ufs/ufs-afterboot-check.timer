@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the UFS post-boot liveness check 3 minutes after boot
+
+[Timer]
+OnBootSec=3min
+AccuracySec=10s
+Unit=ufs-afterboot-check.service
+
+[Install]
+WantedBy=timers.target

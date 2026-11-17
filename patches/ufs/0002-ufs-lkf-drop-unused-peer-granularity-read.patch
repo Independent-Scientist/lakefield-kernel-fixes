@@ -1,0 +1,39 @@
+--- a/drivers/ufs/host/ufshcd-pci.c
++++ b/drivers/ufs/host/ufshcd-pci.c
+@@ -166,13 +166,20 @@
+ 			ufs_intel_set_lanes(hba, 2);
+ 		break;
+ 	case POST_CHANGE:
+-		if (ufshcd_is_hs_mode(dev_req_params)) {
+-			u32 peer_granularity;
+-
++		/*
++		 * Keep the settle delay, drop the discarded
++		 * dme_peer_get(PA_GRANULARITY) read.
++		 *
++		 * peer_granularity is never used on this path, unlike the same read in
++		 * ufs_intel_lkf_apply_dev_quirks(), which compares it against the host
++		 * value.  On Lakefield that read fails (3 retries, saved_uic_err 0x4)
++		 * every time the link is brought back up - system resume, and the
++		 * runtime resume that used to park the controller for good - and each
++		 * failure raises eh_non_fatal and forces a host reset, turning one
++		 * transient link hiccup into a storm of them.
++		 */
++		if (ufshcd_is_hs_mode(dev_req_params))
+ 			usleep_range(1000, 1250);
+-			err = ufshcd_dme_peer_get(hba, UIC_ARG_MIB(PA_GRANULARITY),
+-						  &peer_granularity);
+-		}
+ 		break;
+ 	default:
+ 		break;
+@@ -719,7 +726,8 @@
+ 	}
+ 
+ 	pm_runtime_put_noidle(&pdev->dev);
+-	pm_runtime_allow(&pdev->dev);
++	/* Same reason as ufshcd_wl_probe(): keep this Lakefield controller runtime-active. */
++	pm_runtime_forbid(&pdev->dev);
+ 
+ 	return 0;
+ }

@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lakefield kernel fixes <lakefield@example.invalid>
+Date: Tue, 17 Nov 2026 05:08:46 -0300
+Subject: [PATCH] i915: treat an unaccepted power-well request as an absent
+ gate
+
+Lakefield's PW_2 is fused off, and the hardware does not accept its
+enable request at all: HSW_PWR_WELL_CTL_REQ() reads back 0 straight after
+the write while the other wells set REQ and STATE. That currently ends in
+a timeout WARN on every boot for a gate that can never come up.
+
+Check whether the request bit stuck and, if it did not, log at debug
+level and carry on. Do not use SKL_FUSE_PG_DIST_STATUS to decide: that
+bit also reads 0 for a gate that is merely powered off, and an earlier
+attempt that skipped on it also skipped the real PW_3/PW_4, lost display
+power and blacked the screen.
+---
+ .../i915/display/intel_display_power_well.c   | 21 +++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/drivers/gpu/drm/i915/display/intel_display_power_well.c b/drivers/gpu/drm/i915/display/intel_display_power_well.c
+index 04bd0dd..4aefd1f 100644
+--- a/drivers/gpu/drm/i915/display/intel_display_power_well.c
++++ b/drivers/gpu/drm/i915/display/intel_display_power_well.c
+@@ -357,6 +357,27 @@ static void hsw_wait_for_power_well_enable(struct intel_display *display,
+ 	/* Timeout for PW1:10 us, AUX:not specified, other PWs:20 us. */
+ 	if (intel_de_wait_for_set_ms(display, regs->driver,
+ 				     HSW_PWR_WELL_CTL_STATE(pw_idx), timeout)) {
++		u32 ctl = intel_de_read(display, regs->driver);
++
++		/*
++		 * Distinguish a real timeout from a power gate that does not
++		 * exist on this SKU. On Lakefield PW_2 never accepts its enable
++		 * request: HSW_PWR_WELL_CTL_REQ() reads back 0 immediately after
++		 * the write, while the other wells set REQ and STATE. A gate the
++		 * hardware refuses to even request is absent, and warning about
++		 * it only produces noise.
++		 *
++		 * Do not use SKL_FUSE_PG_DIST_STATUS for this test: it also reads
++		 * 0 for a gate that is merely powered off, and skipping on it
++		 * skipped the real PW_3/PW_4 and left the display unpowered.
++		 */
++		if (!(ctl & HSW_PWR_WELL_CTL_REQ(pw_idx))) {
++			drm_dbg_kms(display->drm,
++				    "%s: enable request not accepted, gate absent on this SKU\n",
++				    intel_power_well_name(power_well));
++			return;
++		}
++
+ 		drm_dbg_kms(display->drm, "%s power well enable timeout\n",
+ 			    intel_power_well_name(power_well));
+ 

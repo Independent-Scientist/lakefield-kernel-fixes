@@ -1,0 +1,16 @@
+# build products
+*.o
+*.ko
+*.ko.zst
+*.mod
+*.mod.c
+*.cmd
+*.symvers
+*.order
+*.d
+build/
+meson-private/
+
+# local notes
+*.log
+last-result.txt

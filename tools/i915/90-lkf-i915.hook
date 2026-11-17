@@ -1,0 +1,13 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux
+Target = linux-lts
+Target = linux-zen
+Target = linux-hardened
+
+[Action]
+Description = Rebuilding the Lakefield-patched i915 for the new kernel...
+When = PostTransaction
+Exec = /usr/local/bin/lkf-i915-post-update
