@@ -296,3 +296,15 @@ at the end of `docs/i915.md`.
 
 GPL-2.0-only. The patches are derived from GPL-2.0 kernel sources; the Mesa
 patch from MIT-licensed Mesa sources. See `LICENSE`.
+
+## Buy me a coffee
+
+If this saved you a day of register archaeology, or got a laptop out of a drawer,
+here is a Bitcoin address:
+
+```
+bc1qavtv0vuwplmuty56prpf7as8j55rxh0kflz98a
+```
+
+Entirely optional. A bug report with `uname -r` and the rejected hunk is worth
+more than coins — that is what keeps this working on kernels past 7.2.14.
