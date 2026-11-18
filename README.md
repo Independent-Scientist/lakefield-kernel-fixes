@@ -300,7 +300,9 @@ patch from MIT-licensed Mesa sources. See `LICENSE`.
 ## Buy me a coffee
 
 If this saved you a day of register archaeology, or got a laptop out of a drawer,
-here is a Bitcoin address:
+here is a Bitcoin address — scan it or copy it, whichever suits you:
+
+![Bitcoin donation QR code for bc1qavtv0vuwplmuty56prpf7as8j55rxh0kflz98a](assets/bitcoin-donation.svg)
 
 ```
 bc1qavtv0vuwplmuty56prpf7as8j55rxh0kflz98a
